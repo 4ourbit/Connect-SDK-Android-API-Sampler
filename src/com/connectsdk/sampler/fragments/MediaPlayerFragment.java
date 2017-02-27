@@ -184,8 +184,8 @@ public class MediaPlayerFragment extends BaseFragment {
     }
 
     @Override
-    public void setTv(ConnectableDevice tv) {
-        super.setTv(tv);
+    public void setDevices(ConnectableDevice tv, ConnectableDevice stereo) {
+        super.setDevices(tv, stereo);
 
         if (tv == null) {
             stopUpdating();

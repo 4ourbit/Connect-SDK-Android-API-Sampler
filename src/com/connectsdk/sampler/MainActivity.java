@@ -21,6 +21,7 @@ import android.support.v4.view.ViewPager;
 import android.support.v7.app.ActionBar;
 import android.support.v7.app.ActionBarActivity;
 import android.text.InputType;
+import android.text.TextUtils;
 import android.util.Log;
 import android.view.Menu;
 import android.view.MenuItem;
@@ -35,7 +36,9 @@ import com.connectsdk.device.ConnectableDeviceListener;
 import com.connectsdk.device.DevicePicker;
 import com.connectsdk.discovery.DiscoveryManager;
 import com.connectsdk.discovery.DiscoveryManager.PairingLevel;
+import com.connectsdk.discovery.provider.SSDPDiscoveryProvider;
 import com.connectsdk.sampler.fragments.BaseFragment;
+import com.connectsdk.service.DenonService;
 import com.connectsdk.service.DeviceService;
 import com.connectsdk.service.DeviceService.PairingType;
 import com.connectsdk.service.capability.MediaPlayer;
@@ -46,11 +49,11 @@ import java.util.List;
 
 public class MainActivity extends ActionBarActivity implements ActionBar.TabListener {
 
-    ConnectableDevice mTV;
-    AlertDialog dialog;
+    ConnectableDevice mTV, mStereo;
+    AlertDialog dialogTv, dialogStereo;
     AlertDialog pairingAlertDialog;
     AlertDialog pairingCodeDialog;
-    DevicePicker dp; 
+    DevicePicker dpTv, dpStereo;
 
     MenuItem connectItem;
 
@@ -59,7 +62,7 @@ public class MainActivity extends ActionBarActivity implements ActionBar.TabList
     ViewPager mViewPager;
     ActionBar actionBar;
     
-    private ConnectableDeviceListener deviceListener = new ConnectableDeviceListener() {
+    private ConnectableDeviceListener tvListener = new ConnectableDeviceListener() {
 
         @Override
         public void onPairingRequired(ConnectableDevice device, DeviceService service, PairingType pairingType) {
@@ -86,7 +89,6 @@ public class MainActivity extends ActionBarActivity implements ActionBar.TabList
         @Override
         public void onConnectionFailed(ConnectableDevice device, ServiceCommandError error) {
             Log.d("2ndScreenAPP", "onConnectFailed");
-            connectFailed(mTV);
         }
 
         @Override
@@ -98,18 +100,27 @@ public class MainActivity extends ActionBarActivity implements ActionBar.TabList
             if (pairingCodeDialog.isShowing()) {
                 pairingCodeDialog.dismiss();
             }
-            registerSuccess(mTV);
+            registerSuccess(mTV, mStereo);
         }
 
         @Override
         public void onDeviceDisconnected(ConnectableDevice device) {
-            Log.d("2ndScreenAPP", "Device Disconnected");
-            connectEnded(mTV);
-            connectItem.setTitle("Connect");
+            Log.d("2ndScreenAPP", "TV Disconnected");
+
+            if (pairingAlertDialog.isShowing()) {
+                pairingAlertDialog.dismiss();
+            }
+            if (pairingCodeDialog.isShowing()) {
+                pairingCodeDialog.dismiss();
+            }
+            mTV.removeListener(tvListener);
+            mTV = null;
+
+            connectItem.setTitle(getConnectItemTitle());
 
             BaseFragment frag = mSectionsPagerAdapter.getFragment(mViewPager.getCurrentItem());
             if (frag != null) {
-                Toast.makeText(getApplicationContext(), "Device Disconnected", Toast.LENGTH_SHORT).show();
+                Toast.makeText(getApplicationContext(), "TV Disconnected", Toast.LENGTH_SHORT).show();
                 frag.disableButtons();
             }
         }
@@ -118,6 +129,38 @@ public class MainActivity extends ActionBarActivity implements ActionBar.TabList
         public void onCapabilityUpdated(ConnectableDevice device, List<String> added, List<String> removed) {
 
         }
+    };
+	
+
+    private ConnectableDeviceListener stereoListener = new ConnectableDeviceListener() {
+        @Override
+        public void onDeviceReady(ConnectableDevice device) {
+            Log.d("2ndScreenAPP", "onPairingSuccess");
+
+            registerSuccess(mTV, mStereo);
+        }
+
+        @Override
+        public void onDeviceDisconnected(ConnectableDevice device) {
+            Log.d("2ndScreenAPP", "Stereo Disconnected");
+
+            mStereo.removeListener(stereoListener);
+            mStereo = null;
+
+            connectItem.setTitle(getConnectItemTitle());
+
+            BaseFragment frag = mSectionsPagerAdapter.getFragment(mViewPager.getCurrentItem());
+            if (frag != null) {
+                Toast.makeText(getApplicationContext(), "Stereo Disconnected", Toast.LENGTH_SHORT).show();
+
+                String toastIconData = frag.getContext().getString(R.string.toast_icon_data);
+                frag.getToastControl().showToast("Stereo Disconnected", toastIconData, "png", null);
+            }
+        }
+
+        @Override public void onPairingRequired(ConnectableDevice device, DeviceService service, PairingType pairingType) { }
+        @Override public void onCapabilityUpdated(ConnectableDevice device, List<String> added, List<String> removed) { }
+        @Override public void onConnectionFailed(ConnectableDevice device, ServiceCommandError error) { }
     };
 	
 
@@ -158,6 +201,7 @@ public class MainActivity extends ActionBarActivity implements ActionBar.TabList
         setupPicker();
 
         DiscoveryManager.getInstance().registerDefaultDeviceTypes();
+        DiscoveryManager.getInstance().registerDeviceService(DenonService.class, SSDPDiscoveryProvider.class);
         DiscoveryManager.getInstance().setPairingLevel(PairingLevel.ON);
         DiscoveryManager.getInstance().start();
     }
@@ -177,52 +221,95 @@ public class MainActivity extends ActionBarActivity implements ActionBar.TabList
     protected void onDestroy() {
         super.onDestroy();
 
-        if (dialog != null) {
-            dialog.dismiss();
+        if (dialogTv != null) {
+            dialogTv.dismiss();
         }
 
         if (mTV != null) {
             mTV.disconnect();
+        }
+
+        if (dialogStereo != null) {
+            dialogStereo.dismiss();
+        }
+
+        if (mStereo != null) {
+            mStereo.disconnect();
         }
     }
 
     public void hConnectToggle()
     {
         if (!this.isFinishing()) {
+            if (mStereo != null)
+            {
+                if (mStereo.isConnected())
+                    mStereo.disconnect();
+
+                mStereo.removeListener(stereoListener);
+                mStereo = null;
+            }
+
             if (mTV != null)
             {
                 if (mTV.isConnected())
                     mTV.disconnect();
 
-                connectItem.setTitle("Connect");
-                mTV.removeListener(deviceListener);
+                mTV.removeListener(tvListener);
                 mTV = null;
-                for (int i = 0; i < mSectionsPagerAdapter.getCount(); i++) {
-                    if (mSectionsPagerAdapter.getFragment(i) != null) {
-                        mSectionsPagerAdapter.getFragment(i).setTv(null);
-                    }
-                }
-            } else
-            {
-                dialog.show();
             }
+
+            for (int i = 0; i < mSectionsPagerAdapter.getCount(); i++) {
+                if (mSectionsPagerAdapter.getFragment(i) != null) {
+                    mSectionsPagerAdapter.getFragment(i).setDevices(mTV, mStereo);
+                }
+            }
+
+            connectItem.setTitle(getConnectItemTitle());
+            registerSuccess(mTV, mStereo);
         }
     }
 
+    private String getConnectItemTitle() {
+        List<String> deviceNames = new ArrayList<>();
+        if (mTV != null) deviceNames.add(mTV.getFriendlyName());
+        if (mStereo != null) deviceNames.add(mStereo.getFriendlyName());
+
+        String title = TextUtils.join(" + ", deviceNames);
+        if (title.isEmpty()) title = "Connect";
+
+        return title;
+    }
+
     private void setupPicker() {
-        dp = new DevicePicker(this);
-        dialog = dp.getPickerDialog("Device List", new AdapterView.OnItemClickListener() {
+        dpTv = new DevicePicker(this);
+        dialogTv = dpTv.getPickerDialog("Device List", new AdapterView.OnItemClickListener() {
 
             @Override
             public void onItemClick(AdapterView<?> arg0, View arg1, int arg2, long arg3) {
 
                 mTV = (ConnectableDevice)arg0.getItemAtPosition(arg2);
-                mTV.addListener(deviceListener);
+                mTV.addListener(tvListener);
                 mTV.setPairingType(null);
                 mTV.connect();
-                connectItem.setTitle(mTV.getFriendlyName());
+                connectItem.setTitle(getConnectItemTitle());
 
-                dp.pickDevice(mTV);
+                dpTv.pickDevice(mTV);
+            }
+        });
+
+        dpStereo = new DevicePicker(this);
+        dialogStereo = dpStereo.getPickerDialog("Stereo List", new AdapterView.OnItemClickListener() {
+
+            @Override
+            public void onItemClick(AdapterView<?> arg0, View arg1, int arg2, long arg3) {
+
+                mStereo = (ConnectableDevice)arg0.getItemAtPosition(arg2);
+                mStereo.addListener(stereoListener);
+                mStereo.connect();
+                connectItem.setTitle(getConnectItemTitle());
+
+                dpStereo.pickDevice(mStereo);
             }
         });
 
@@ -234,7 +321,7 @@ public class MainActivity extends ActionBarActivity implements ActionBar.TabList
 
             @Override
             public void onClick(DialogInterface dialog, int which) {
-                dp.cancelPicker();
+                dpTv.cancelPicker();
 
                 hConnectToggle();
             }
@@ -264,7 +351,7 @@ public class MainActivity extends ActionBarActivity implements ActionBar.TabList
 
             @Override
             public void onClick(DialogInterface dialog, int whichButton) {
-                dp.cancelPicker();
+                dpTv.cancelPicker();
 
                 hConnectToggle();
                 imm.hideSoftInputFromWindow(input.getWindowToken(), 0);
@@ -279,34 +366,23 @@ public class MainActivity extends ActionBarActivity implements ActionBar.TabList
         super.onResume();
     }
 
-    void registerSuccess(ConnectableDevice device) {
+    void registerSuccess(ConnectableDevice tv, ConnectableDevice stereo) {
         Log.d("2ndScreenAPP", "successful register");
 
+        if (tv == null) {
+            dialogTv.show();
+            return;
+        }
+
+        if (stereo == null) {
+            dialogStereo.show();
+            return;
+        }
+
         BaseFragment frag = mSectionsPagerAdapter.getFragment(mViewPager.getCurrentItem());
-        if (frag != null)
-            frag.setTv(mTV);
-    }
-
-    void connectFailed(ConnectableDevice device) {
-        if (device != null)
-            Log.d("2ndScreenAPP", "Failed to connect to " + device.getIpAddress());
-
-        if (mTV != null) {
-            mTV.removeListener(deviceListener);
-            mTV.disconnect();
-            mTV = null;
+        if (frag != null) {
+            frag.setDevices(mTV, mStereo);
         }
-    }
-
-    void connectEnded(ConnectableDevice device) {
-        if (pairingAlertDialog.isShowing()) {
-            pairingAlertDialog.dismiss();
-        }
-        if (pairingCodeDialog.isShowing()) {
-            pairingCodeDialog.dismiss();
-        }
-        mTV.removeListener(deviceListener);
-        mTV = null;
     }
 
     @Override
@@ -333,7 +409,7 @@ public class MainActivity extends ActionBarActivity implements ActionBar.TabList
         getSupportActionBar().setTitle(mSectionsPagerAdapter.getTitle(tab.getPosition()));
         BaseFragment frag = mSectionsPagerAdapter.getFragment(tab.getPosition());
         if (frag != null)
-            frag.setTv(mTV);
+            frag.setDevices(mTV, mStereo);
     }
 
     @Override public void onTabUnselected(ActionBar.Tab tab, FragmentTransaction fragmentTransaction) { }
